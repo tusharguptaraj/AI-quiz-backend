@@ -7,6 +7,11 @@ import quizRoutes from "./routes/quiz.js";
 import quizzesRoutes from "./routes/quizzes.js";
 
 
+app.use(cors({
+  origin: "https://intelliq.onrender.com",
+  credentials: true
+}));
+
 
 
 dotenv.config();
