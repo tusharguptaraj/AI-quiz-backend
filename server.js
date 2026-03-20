@@ -24,6 +24,10 @@ app.use("/api/quiz", quizRoutes);
 
 app.use("/api/quizzes", quizzesRoutes);
 
+app.get("/health", (req, res)=> {
+  res.status(200).send("OK");
+});
+
 // Error handler (optional)
 app.use((err, req, res, next) => {
   console.error(err.stack);
