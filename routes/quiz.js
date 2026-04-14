@@ -5,7 +5,6 @@ import multer from "multer";
 import fs from "fs";
 import mammoth from "mammoth";
 import Quiz from "../models/Quiz.js";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs"; // ✅ correct path for v4
 
 dotenv.config();
 
@@ -26,23 +25,27 @@ async function extractTextFromFile(filePath, mimeType) {
 
   if (ext.includes("pdf")) {
     try {
+      const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
       const data = new Uint8Array(fs.readFileSync(filePath));
       const pdf = await pdfjsLib.getDocument({ data }).promise;
-      let text = "";
 
+  
+
+      let fullText = "";
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
         const content = await page.getTextContent();
         const pageText = content.items.map((item) => item.str).join(" ");
-        text += pageText + "\n";
+        fullText += pageText + "\n";
       }
 
-      if (!text.trim()) {
+      if (!fullText.trim() || fullText.trim().length < 20) {
         throw new Error("Unable to extract text from PDF (it may be scanned or image-based).");
       }
 
-      return text;
+      return fullText;
     } catch (err) {
+      console.error("❌ PDF parse error details:", err);
       throw new Error(`PDF extraction failed: ${err.message}`);
     }
   } else if (ext.includes("word") || filePath.endsWith(".docx")) {
@@ -106,7 +109,7 @@ router.post("/generate", upload.single("file"), async (req, res) => {
         }
         quizSource = extractedText.slice(0, 4000);
       } catch (err) {
-        fs.unlinkSync(file.path); // clean temp file
+        fs.unlinkSync(file.path);
         return res.status(400).json({
           error: "Failed to extract text from uploaded PDF.",
           details: err.message,
@@ -124,25 +127,29 @@ router.post("/generate", upload.single("file"), async (req, res) => {
       console.warn("⚠️ Failed to generate title, using fallback:", err.message);
     }
 
-    // 🧩 Generate quiz questions using OpenRouter
+    // ✅ Generate quiz with distributed answer indices
     const systemPrompt = `Generate exactly 10 multiple-choice questions in JSON format.
-Each object should include:
-- question
-- options (4)
-- answer (correct index 0–3)
-- explanation (2 lines)
+Each object must include:
+- "question": the question string
+- "options": array of exactly 4 answer strings
+- "answer": integer index (0–3) of the correct option
+- "explanation": 2-line explanation of why the answer is correct
+
+IMPORTANT: The "answer" values across all 10 questions MUST be distributed across indices 0, 1, 2, and 3.
+Do NOT place the correct answer at index 0 for more than 2–3 questions.
+Shuffle the position of the correct answer for each question independently.
 
 Difficulty: "${difficulty}".
 Based on this content:
 """${quizSource}"""
-Return only the JSON array.`;
+Return only the raw JSON array. No markdown, no backticks, no explanation.`;
 
     const aiRes = await axios.post(
       "https://openrouter.ai/api/v1/chat/completions",
       {
         model: "openai/gpt-4o-mini",
         messages: [
-          { role: "system", content: "You are a helpful quiz generator that returns valid JSON." },
+          { role: "system", content: "You are a helpful quiz generator that returns valid JSON only. Never wrap output in markdown code blocks." },
           { role: "user", content: systemPrompt },
         ],
         temperature: 0.7,
